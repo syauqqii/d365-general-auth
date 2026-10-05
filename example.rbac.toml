@@ -1,0 +1,64 @@
+# Role based access control. Copy to rbac.toml, edit, restart the server.
+#
+# "*" in a role list means any logged-in user. An empty list [] means nobody
+# (except superuser_roles). A rule that is not written falls back to the
+# next, less specific one, and finally to `default`.
+
+# Roles a user may be given; the admin API and the seeder reject others.
+roles = ["superadmin", "admin", "manager", "sales", "warehouse", "viewer"]
+
+# Full access to every route and entity. Accounts with these roles can only
+# be created or changed from the server CLI (seeder), never through the API.
+superuser_roles = ["superadmin"]
+
+# Who may use /admin/* (user management) unless [routes] says otherwise.
+admin_roles = ["superadmin", "admin"]
+
+# Users with these roles cannot be edited, deactivated or force-logged-out by
+# a normal admin; only a superuser can. Only a superuser may grant them.
+protected_roles = ["admin"]
+
+# Default for every route / D365 entity without its own rule.
+# ["*"] = all-access mode for every logged-in user.
+default = ["*"]
+
+# Which roles may log in from which client type ("client" in the login body).
+[clients]
+web = ["*"]
+mobile = ["*"]
+
+# API routes: "METHOD /path" with the path as registered, WITHOUT the /api/v1
+# prefix. "*" as METHOD matches every method. Unlisted routes use `default`
+# (or admin_roles for /admin/*).
+[routes]
+"GET /admin/users" = ["superadmin", "admin", "manager"]
+"GET /admin/users/:id" = ["superadmin", "admin", "manager"]
+
+# D365 entities: [d365.<connector>.<entity>], <entity> being a key of
+# [endpoints] in the connector file. "*" matches any connector or entity.
+# Actions: read (GET), create (POST), update (PATCH/PUT), delete (DELETE);
+# `all` covers the actions not listed in the same rule.
+# Lookup order: <conn>.<entity> -> *.<entity> -> <conn>.* -> *.* -> default
+
+# Deleting in D365 is reserved for superusers unless a more specific rule
+# allows it.
+[d365."*"."*"]
+delete = []
+
+[d365."*".customer]
+read = ["*"]
+create = ["manager", "sales"]
+update = ["manager", "sales"]
+
+[d365."*".item]
+read = ["*"]
+create = ["manager", "warehouse"]
+update = ["manager", "warehouse"]
+
+[d365."*".so_header]
+read = ["manager", "sales"]
+create = ["manager", "sales"]
+update = ["manager", "sales"]
+
+[d365."*".so_lines]
+all = ["manager", "sales"]

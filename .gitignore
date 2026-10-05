@@ -1,0 +1,15 @@
+# Local configuration and secrets (copy from the example.* files)
+.env
+config.toml
+rbac.toml
+connector-*.toml
+!example.connector-*.toml
+init/users.json
+
+# Local data and build output
+data/
+*.db
+*.db-wal
+*.db-shm
+/general-auth
+/general-auth.exe

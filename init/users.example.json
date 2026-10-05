@@ -1,0 +1,38 @@
+[
+  {
+    "username": "superadmin",
+    "email": "superadmin@example.com",
+    "name": "Super Administrator",
+    "password": "ChangeMe-Super-123",
+    "role": "superadmin",
+    "can_change_username": false,
+    "can_change_email": false,
+    "can_change_password": true
+  },
+  {
+    "username": "admin",
+    "email": "admin@example.com",
+    "code": "ADM001",
+    "name": "Administrator",
+    "password": "ChangeMe-Admin-123",
+    "role": "admin"
+  },
+  {
+    "username": "sales01",
+    "email": "sales01@example.com",
+    "code": "S001",
+    "name": "Sales One",
+    "password": "ChangeMe-Sales-123",
+    "role": "sales",
+    "can_change_username": false,
+    "can_change_email": false,
+    "can_change_password": true
+  },
+  {
+    "username": "viewer01",
+    "name": "Viewer (password_hash of ViewerPass123)",
+    "password_hash": "$2a$12$z9TJDazustwHQZZFT5vM2.jNJrwqopBg7m3K1.PIMcHOpDWLEe25S",
+    "role": "viewer",
+    "is_active": false
+  }
+]

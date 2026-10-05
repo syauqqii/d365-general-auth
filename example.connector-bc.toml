@@ -1,0 +1,49 @@
+# Dynamics 365 Business Central connector.
+# Copy to connector-bc.toml (git-ignored) and fill in your tenant.
+#
+# Setup (https://learn.microsoft.com/dynamics365/business-central/dev-itpro/administration/automation-apis-using-s2s-authentication):
+#   1. Microsoft Entra admin center > App registrations > New registration.
+#   2. Certificates & secrets > New client secret (copy the value).
+#   3. API permissions > Dynamics 365 Business Central > Application
+#      permissions > API.ReadWrite.All > Grant admin consent.
+#   4. In Business Central open "Microsoft Entra Applications" > New, paste
+#      the client ID, set State = Enabled and assign least-privilege
+#      permission sets (SUPER cannot be assigned to apps).
+
+d365_product = "bc"                               # "bc" or "fo"
+
+# Microsoft Entra ID, client credentials flow (OAuth 2.0 v2 endpoint).
+d365_tenant_id = "${BC_TENANT_ID}"                # Directory (tenant) ID
+d365_client_id = "${BC_CLIENT_ID}"                # Application (client) ID
+d365_client_secret = "${BC_CLIENT_SECRET}"
+d365_grant_type = "client_credentials"
+d365_scope = "https://api.businesscentral.dynamics.com/.default"
+d365_auth_url = "https://login.microsoftonline.com/%s/oauth2/v2.0/token"  # %s = tenant ID
+
+# Base URL; %s is replaced with the endpoint name from [endpoints] (plus the
+# record key, if any). Pick ONE style:
+#
+#   OData web services (pages published in "Web Services"):
+#     https://api.businesscentral.dynamics.com/v2.0/<tenant>/<environment>/ODataV4/Company('<company name>')/%s
+#   Standard API v2.0 (entity sets: customers, items, salesOrders, ...):
+#     https://api.businesscentral.dynamics.com/v2.0/<tenant>/<environment>/api/v2.0/companies(<company id>)/%s
+#
+# Spaces in the company name must be written as %20.
+api_url = "https://api.businesscentral.dynamics.com/v2.0/${BC_TENANT_ID}/${BC_ENVIRONMENT:-Production}/ODataV4/Company('${BC_COMPANY}')/%s"
+
+timeout = "30s"
+
+# Generic entity name used in /api/v1/d365/bc/<entity> = BC web service name.
+# Add entities here; no code changes needed. Permissions live in rbac.toml.
+[endpoints]
+customer = "Customers_Card"
+item = "Item_Card_Excel"
+so_header = "SOHeader"
+so_lines = "SOLines"
+
+# Added to every request when the client did not send the parameter.
+[default_query]
+"$top" = "200"
+
+# Always applied, replacing whatever the client sent.
+[forced_query]

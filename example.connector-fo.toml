@@ -1,0 +1,48 @@
+# Dynamics 365 Finance & Operations (Finance, Supply Chain Management)
+# connector. Copy to connector-fo.toml (git-ignored) and fill in your
+# environment.
+#
+# Setup (https://learn.microsoft.com/dynamics365/fin-ops-core/dev-itpro/data-entities/services-home-page):
+#   1. Microsoft Entra admin center > App registrations > New registration.
+#   2. Certificates & secrets > New client secret (copy the value).
+#   3. In F&O: System administration > Setup > Microsoft Entra applications
+#      > New: client ID + a dedicated service user with only the security
+#      roles this integration needs (not Admin). F&O applies that user's
+#      permissions and default company to every call.
+
+d365_product = "fo"                               # "bc" or "fo"
+
+# Microsoft Entra ID, client credentials flow (OAuth 2.0 v2 endpoint).
+# The scope is your F&O environment URL (no trailing slash) + "/.default".
+d365_tenant_id = "${FO_TENANT_ID}"
+d365_client_id = "${FO_CLIENT_ID}"
+d365_client_secret = "${FO_CLIENT_SECRET}"
+d365_grant_type = "client_credentials"
+d365_scope = "https://${FO_ENV_HOST}/.default"
+d365_auth_url = "https://login.microsoftonline.com/%s/oauth2/v2.0/token"  # %s = tenant ID
+
+# OData root is <environment URL>/data; %s is replaced with the entity set
+# name (plus the record key, if any), e.g.
+#   https://contoso.operations.dynamics.com/data/CustomersV3(dataAreaId='usmf',CustomerAccount='US-001')
+# Browse <environment URL>/data/$metadata for every public entity set.
+api_url = "https://${FO_ENV_HOST}/data/%s"
+
+timeout = "60s"
+
+# Generic entity name used in /api/v1/d365/fo/<entity> = F&O public entity
+# set name. Keys in F&O need every key field, usually including dataAreaId.
+[endpoints]
+customer = "CustomersV3"
+item = "ReleasedProductsV2"
+so_header = "SalesOrderHeadersV2"
+so_lines = "SalesOrderLines"
+
+# Added when the client did not send the parameter.
+[default_query]
+"$top" = "200"
+
+# Always applied, replacing whatever the client sent. F&O returns only the
+# service user's default company; forcing cross-company=false stops clients
+# from reading other legal entities with ?cross-company=true.
+[forced_query]
+cross-company = "false"
