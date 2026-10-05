@@ -37,7 +37,8 @@ item = "ReleasedProductsV2"
 so_header = "SalesOrderHeadersV2"
 so_lines = "SalesOrderLines"
 
-# Added when the client did not send the parameter.
+# Added to collection reads (GET without a key) when the client did not
+# send the parameter.
 [default_query]
 "$top" = "200"
 

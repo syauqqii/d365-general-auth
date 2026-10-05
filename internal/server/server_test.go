@@ -420,11 +420,15 @@ func TestD365Proxy(t *testing.T) {
 	if echo["path"] != "/data/CustomersV3(dataAreaId='usmf',CustomerAccount='US-001')" || echo["auth"] != "Bearer aad-token" {
 		t.Fatalf("unexpected forwarded request %v", echo)
 	}
-	// Client tried cross-company=true; forced_query wins. default $top added.
-	if echo["query"] != "$select=Name&%24top=100&cross-company=false" {
+	// Client tried cross-company=true; forced_query wins. No $top on a keyed read.
+	if echo["query"] != "$select=Name&cross-company=false" {
 		t.Fatalf("unexpected forwarded query %q", echo["query"])
 	}
-	e.req("GET", api+"/d365/fo/customer", m.AccessToken, nil).expect(t, "read 2", 200)
+	r = e.req("GET", api+"/d365/fo/customer?$filter=Name%20eq%20'A'", m.AccessToken, nil).expect(t, "read collection", 200)
+	json.Unmarshal(r.raw, &echo)
+	if echo["query"] != "$filter=Name%20eq%20'A'&%24top=100&cross-company=false" {
+		t.Fatalf("collection read should get default $top: %q", echo["query"])
+	}
 	if n := atomic.LoadInt32(tokenCalls); n != 1 {
 		t.Fatalf("Entra token should be cached, fetched %d times", n)
 	}
@@ -433,7 +437,7 @@ func TestD365Proxy(t *testing.T) {
 	e.req("DELETE", api+"/d365/fo/customer('1')", m.AccessToken, nil).expect(t, "delete falls to *.*", 403)
 	r = e.req("PATCH", api+"/d365/fo/so_header('SO1')", m.AccessToken, map[string]string{"x": "y"}).expect(t, "update so", 200)
 	json.Unmarshal(r.raw, &echo)
-	if echo["if_match"] != "*" {
+	if echo["if_match"] != "*" || echo["query"] != "cross-company=false" {
 		t.Fatalf("If-Match default missing: %v", echo)
 	}
 	e.req("GET", api+"/d365/fo/customer('1')/../SalesOrderHeadersV2", m.AccessToken, nil).expect(t, "path escape", 400)

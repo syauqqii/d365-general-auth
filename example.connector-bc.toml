@@ -41,7 +41,8 @@ item = "Item_Card_Excel"
 so_header = "SOHeader"
 so_lines = "SOLines"
 
-# Added to every request when the client did not send the parameter.
+# Added to collection reads (GET without a key) when the client did not
+# send the parameter.
 [default_query]
 "$top" = "200"
 
