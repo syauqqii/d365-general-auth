@@ -13,3 +13,6 @@ data/
 *.db-shm
 /general-auth
 /general-auth.exe
+
+# Web frontend is kept local only
+frontend/
