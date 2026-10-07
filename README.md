@@ -47,20 +47,41 @@ Contoh perintah di README ini memakai `./general-auth`. Selama development, kamu
 
 ## Setup pertama kali
 
-Semua file konfigurasi punya versi contohnya dengan awalan `example.`. File contoh itulah yang masuk ke git. File aslinya (`.env`, `config.toml`, `rbac.toml`, `connector-*.toml`, `init/users.json`) sengaja di-ignore, karena isinya beda di tiap environment dan sebagian berisi secret.
+Yang wajib kamu isi cuma tiga file:
+
+| File | Isinya |
+|---|---|
+| `.env` | secret (JWT, database, kredensial Microsoft Entra) dan **connector mana yang aktif** (`D365_CONNECTOR`) |
+| `rbac.toml` | hak akses per role |
+| satu file connector | instance D365 (`instance = "bc"` / `"fo"`), company/environment (BC) atau host (FO), dan daftar entity |
+| `config.toml` *(opsional)* | hanya kalau mau mengubah pengaturan bawaan, misalnya `cors_origins`. Tanpa file ini server memakai default. |
+
+Semua file itu punya versi contoh dengan awalan `example.`. File contoh itulah yang masuk ke git. File aslinya sengaja di-ignore, karena isinya beda di tiap environment dan sebagian berisi secret. Ditambah `init/users.json` untuk user awal (lihat [seeder](#mengisi-user-awal-seeder)).
 
 ### 1. Copy file contoh
 
+Pakai `cp`, jangan `mv`, supaya file `example.*` tetap ada sebagai acuan.
+
 ```bash
-cp example.env               .env
-cp example.config.toml       config.toml
-cp example.rbac.toml         rbac.toml
+cp example.env             .env
+cp example.rbac.toml       rbac.toml
+cp init/users.example.json init/users.json
+cp example.config.toml     config.toml   # opsional
+
+# pilih SALAH SATU, sesuai instance D365 kamu
 cp example.connector-bc.toml connector-bc.toml
 cp example.connector-fo.toml connector-fo.toml
-cp init/users.example.json   init/users.json
 ```
 
-Kalau kamu cuma pakai BC atau cuma FO, cukup copy connector yang dipakai. Jangan lupa hapus juga baris connector yang tidak dipakai dari bagian `[connectors]` di `config.toml`, karena server akan menolak start kalau ada file connector yang hilang.
+Nama file connector bebas, misalnya `connector-bc-prod.toml` atau `connector-pusat.toml`. Yang menentukan BC atau FO adalah isi `instance` di dalam file itu, bukan nama file-nya.
+
+Lalu di `.env`, tunjuk file connector yang aktif:
+
+```dotenv
+D365_CONNECTOR=connector-bc.toml
+```
+
+Kalau dikosongkan, server tetap jalan sebagai auth server saja tanpa proxy D365.
 
 ### 2. Isi secret di `.env`
 
@@ -71,9 +92,9 @@ openssl rand -hex 32    # hasilnya untuk JWT_ACCESS_SECRET
 openssl rand -hex 32    # hasilnya untuk JWT_REFRESH_SECRET
 ```
 
-Setelah itu isi koneksi database (`DB_*`) dan kredensial D365 (`BC_*` / `FO_*`). Cara mendapatkan kredensial D365 dijelaskan di bagian [Menyiapkan akses ke D365](#menyiapkan-akses-ke-d365).
+Setelah itu isi koneksi database (`DB_*`), `D365_CONNECTOR`, dan kredensial Microsoft Entra (`D365_TENANT_ID`, `D365_CLIENT_ID`, `D365_CLIENT_SECRET`). Variabel ini sama untuk BC maupun FO, karena yang aktif cuma satu connector. Cara mendapatkan kredensialnya dijelaskan di bagian [Menyiapkan akses ke D365](#menyiapkan-akses-ke-d365).
 
-`config.toml` tidak menyimpan secret apa pun. Isinya hanya referensi seperti `${JWT_ACCESS_SECRET}` yang diambil dari `.env`. Di server, kamu bisa langsung set environment variable tanpa file `.env`; environment variable selalu menang atas isi `.env`.
+`config.toml` tidak menyimpan secret apa pun. Secret selalu dibaca dari `.env` lewat referensi seperti `${JWT_ACCESS_SECRET}` di pengaturan bawaan. Di server, kamu bisa langsung set environment variable tanpa file `.env`; environment variable selalu menang atas isi `.env`.
 
 ### 3. Pilih database
 
@@ -90,14 +111,17 @@ Database-nya sendiri harus dibuat dulu (`CREATE DATABASE general_auth;`). Tabel-
 
 Waktu pindah driver, ingat ganti `DB_PORT` juga. Ini kesalahan yang paling sering terjadi.
 
-### 4. Sesuaikan `config.toml`
+### 4. (Opsional) Sesuaikan `config.toml`
 
-Biasanya yang perlu diubah cuma beberapa:
+Semua pengaturan punya nilai bawaan yang tertanam di aplikasi, daftar lengkapnya ada di [internal/config/defaults.toml](internal/config/defaults.toml). `config.toml` cukup berisi key yang mau diubah saja; key yang tidak ditulis tetap memakai default. Yang paling sering diubah:
 
-- `cors_origins`: isi dengan alamat web app kamu, misalnya `["https://portal.perusahaan.com"]`. Aplikasi mobile tidak butuh CORS.
-- Umur token di `[jwt.access]` dan `[jwt.refresh]`. Default-nya sudah masuk akal untuk kebanyakan kasus.
+- `cors_origins`: isi dengan alamat web app kamu, misalnya `["https://portal.perusahaan.com"]`. Default-nya `http://localhost:5173`. Aplikasi mobile tidak butuh CORS.
+- `[cookie] same_site`, kalau web dan API ada di domain yang berbeda.
 - `[security]`, kalau mau mengubah batas percobaan login.
 - `[account]`, untuk menentukan apakah user baru boleh mengganti username, email, atau password-nya sendiri.
+- `[database] auto_migrate = false` untuk produksi.
+
+Umur token diatur lewat `.env` (`JWT_*_TTL`).
 
 ### 5. Atur hak akses di `rbac.toml`
 
@@ -109,7 +133,7 @@ File contohnya sudah bisa dipakai langsung. Penjelasan lengkapnya ada di bagian 
 ./general-auth check
 ```
 
-Kalau semua beres, outputnya kira-kira `config OK: env=development db=postgres connectors=2`. Kalau ada yang salah, misalnya key salah ketik atau secret terlalu pendek, pesan error-nya akan menunjukkan bagian mana yang harus dibetulkan.
+Kalau semua beres, outputnya kira-kira `config OK: env=development db=postgres connectors=[bc(bc)]`, yaitu nama connector dan instance-nya. Kalau ada yang salah, misalnya key salah ketik atau secret terlalu pendek, pesan error-nya akan menunjukkan bagian mana yang harus dibetulkan.
 
 ## Contoh isi file konfigurasi
 
@@ -151,130 +175,56 @@ DB_ENCRYPT=true
 DB_TRUST_SERVER_CERT=false
 DB_DSN=
 
-# --- D365 Business Central (connector-bc.toml) -----------------------------
-BC_TENANT_ID=00000000-0000-0000-0000-000000000000
-BC_CLIENT_ID=00000000-0000-0000-0000-000000000000
-BC_CLIENT_SECRET=your-client-secret
-BC_ENVIRONMENT=Production
-BC_COMPANY=CRONUS%20International%20Ltd.
+# --- D365 ------------------------------------------------------------------
+# Active connector file, next to config.toml. Any file name works, e.g.
+# connector-bc.toml, connector-fo.toml or connector-sales-prod.toml; the
+# file itself says whether it is BC or FO (instance = "bc" | "fo").
+# Several connectors: separate with commas. Empty = D365 proxy off.
+D365_CONNECTOR=connector-bc.toml
 
-# --- D365 Finance & Operations (connector-fo.toml) -------------------------
-FO_TENANT_ID=00000000-0000-0000-0000-000000000000
-FO_CLIENT_ID=00000000-0000-0000-0000-000000000000
-FO_CLIENT_SECRET=your-client-secret
-FO_ENV_HOST=your-env.operations.dynamics.com
+# Microsoft Entra app registration used by the connector.
+D365_TENANT_ID=00000000-0000-0000-0000-000000000000
+D365_CLIENT_ID=00000000-0000-0000-0000-000000000000
+D365_CLIENT_SECRET=your-client-secret
 ```
 
 ### `config.toml` (dari `example.config.toml`)
 
 ```toml
-# general-auth configuration.
-# Copy to config.toml and adjust. config.toml is git-ignored.
+# general-auth configuration, OPTIONAL.
 #
-# Any value may reference an environment variable: "${NAME}" or
-# "${NAME:-default}". A .env file next to this file is loaded first, so keep
-# secrets in .env (see example.env) and never write them here.
+# Without config.toml the server runs on the built-in defaults plus .env.
+# Copy this file to config.toml only to change something; write just the
+# keys you change. Every key and its default is listed in
+# internal/config/defaults.toml. Secrets belong in .env, never here.
 #
+# Values may reference environment variables: "${NAME}" or "${NAME:-default}".
 # Durations accept s, m, h, d (day) and w (week): "15m", "12h", "7d", "1d12h".
 
 [app]
-name = "general-auth"
-env = "${APP_ENV:-development}"     # "production" turns on strict checks (see README)
-host = "${APP_HOST:-0.0.0.0}"
-port = "${APP_PORT:-3000}"
-body_limit_mb = 10
-read_timeout = "30s"
-write_timeout = "90s"                # must exceed the slowest D365 call
-idle_timeout = "120s"
 # Exact browser origins allowed to call the API (scheme + host + port).
-# Mobile apps do not need CORS. Use [] to disable CORS entirely.
+# Mobile apps do not need CORS. [] disables CORS entirely.
 cors_origins = ["http://localhost:5173"]
-# Behind a reverse proxy / load balancer: header with the real client IP and
-# the proxy addresses allowed to set it. Leave empty when exposed directly.
-proxy_header = "${APP_PROXY_HEADER:-}"
+# Behind a reverse proxy / load balancer: the proxy addresses allowed to set
+# the real-client-IP header (APP_PROXY_HEADER in .env).
 trusted_proxies = []
 
-[jwt]
-issuer = "general-auth"
-audience = "general-auth-api"
-
-# Access token: short-lived, sent as "Authorization: Bearer ..." on every call.
-[jwt.access]
-secret = "${JWT_ACCESS_SECRET}"
-ttl = "${JWT_ACCESS_TTL:-15m}"
-
-# Refresh token: used only on /auth/refresh, rotated on every use.
-[jwt.refresh]
-secret = "${JWT_REFRESH_SECRET}"
-web_ttl = "${JWT_REFRESH_WEB_TTL:-7d}"        # idle timeout for browsers
-mobile_ttl = "${JWT_REFRESH_MOBILE_TTL:-90d}" # idle timeout for mobile apps
-max_session_age = "${JWT_MAX_SESSION_AGE:-180d}" # absolute limit, "0" = off
-
-# Web clients receive the refresh token in this HttpOnly cookie instead of the
-# response body. Mobile clients always receive it in the body.
+# Web app and API on unrelated domains: same_site = "None".
 [cookie]
-enabled = true
-name = "ga_refresh"
-path = "/api/v1/auth"
-domain = ""                          # "" = the API host only
-secure = true                        # HTTPS only (browsers allow http://localhost)
 same_site = "Strict"                 # Strict | Lax | None (None needs secure)
 
 [database]
-driver = "${DB_DRIVER:-postgres}"    # postgres | mysql | sqlite | sqlserver
-host = "${DB_HOST:-localhost}"
-port = "${DB_PORT:-5432}"
-user = "${DB_USER:-postgres}"
-password = "${DB_PASSWORD}"
-name = "${DB_NAME:-general_auth}"    # for sqlite: the file path, e.g. "data/general-auth.db"
-dsn = "${DB_DSN:-}"                  # optional raw DSN, overrides the fields above
-max_open_conns = 25                  # keep below the database's own connection limit
-max_idle_conns = 25                  # = max_open_conns avoids reconnect churn
-conn_max_lifetime = "30m"            # recycle connections (load balancers, failover)
-conn_max_idle_time = "5m"
 auto_migrate = true                  # set false in production and run `general-auth migrate`
 
-# Extra DSN parameters per driver; only the table of the active driver is
-# used. Empty values are skipped (driver default applies).
-[database.params.postgres]
-sslmode = "${DB_SSLMODE:-prefer}"          # disable | prefer | require | verify-full
-
-[database.params.mysql]
-tls = "${DB_TLS:-false}"                   # false | true | skip-verify | preferred
-charset = "utf8mb4"
-
-[database.params.sqlserver]
-encrypt = "${DB_ENCRYPT:-true}"            # true | false | disable
-TrustServerCertificate = "${DB_TRUST_SERVER_CERT:-false}"
-
-[database.params.sqlite]
-
 [security]
-bcrypt_cost = 12                     # 12 is about 250 ms per hash; raise as hardware gets faster
-password_min_length = 8
-login_rate_limit = 10                # requests per IP per window on login/refresh/me-changes
-login_rate_window = "1m"
 max_failed_logins = 5                # wrong passwords before the account locks, 0 = off
 lockout_duration = "15m"
-session_cleanup_interval = "1h"      # delete expired/revoked sessions
 
 # Defaults for new users; each user can be changed by an admin later.
 [account]
 default_can_change_username = false
 default_can_change_email = true
 default_can_change_password = true
-
-[rbac]
-file = "rbac.toml"
-
-# D365 connectors: name = file. The name is used in the URL:
-#   /api/v1/d365/<name>/<entity>
-[connectors]
-bc = "connector-bc.toml"
-fo = "connector-fo.toml"
-
-[seed]
-users_file = "init/users.json"
 ```
 
 ### `rbac.toml` (dari `example.rbac.toml`)
@@ -350,7 +300,8 @@ all = ["manager", "sales"]
 
 ```toml
 # Dynamics 365 Business Central connector.
-# Copy to connector-bc.toml (git-ignored) and fill in your tenant.
+# Copy to connector-bc.toml (git-ignored; any connector-<name>.toml works),
+# fill in your environment, and point D365_CONNECTOR in .env at it.
 #
 # Setup (https://learn.microsoft.com/dynamics365/business-central/dev-itpro/administration/automation-apis-using-s2s-authentication):
 #   1. Microsoft Entra admin center > App registrations > New registration.
@@ -361,31 +312,35 @@ all = ["manager", "sales"]
 #      the client ID, set State = Enabled and assign least-privilege
 #      permission sets (SUPER cannot be assigned to apps).
 
-d365_product = "bc"                               # "bc" or "fo"
+instance = "bc"                                   # "bc" or "fo"
 
-# Microsoft Entra ID, client credentials flow (OAuth 2.0 v2 endpoint).
-d365_tenant_id = "${BC_TENANT_ID}"                # Directory (tenant) ID
-d365_client_id = "${BC_CLIENT_ID}"                # Application (client) ID
-d365_client_secret = "${BC_CLIENT_SECRET}"
-d365_grant_type = "client_credentials"
-d365_scope = "https://api.businesscentral.dynamics.com/.default"
-d365_auth_url = "https://login.microsoftonline.com/%s/oauth2/v2.0/token"  # %s = tenant ID
+# Name in the URL (/api/v1/d365/<name>/<entity>) and in rbac.toml.
+# Defaults to the file name without "connector-" and ".toml".
+# name = "bc"
 
-# Base URL; %s is replaced with the endpoint name from [endpoints] (plus the
-# record key, if any). Pick ONE style:
-#
-#   OData web services (pages published in "Web Services"):
-#     https://api.businesscentral.dynamics.com/v2.0/<tenant>/<environment>/ODataV4/Company('<company name>')/%s
-#   Standard API v2.0 (entity sets: customers, items, salesOrders, ...):
-#     https://api.businesscentral.dynamics.com/v2.0/<tenant>/<environment>/api/v2.0/companies(<company id>)/%s
-#
-# Spaces in the company name must be written as %20.
-api_url = "https://api.businesscentral.dynamics.com/v2.0/${BC_TENANT_ID}/${BC_ENVIRONMENT:-Production}/ODataV4/Company('${BC_COMPANY}')/%s"
+# Microsoft Entra ID, client credentials flow. Secrets stay in .env.
+d365_tenant_id = "${D365_TENANT_ID}"              # Directory (tenant) ID
+d365_client_id = "${D365_CLIENT_ID}"              # Application (client) ID
+d365_client_secret = "${D365_CLIENT_SECRET}"
+# Optional, defaults shown:
+# d365_scope = "https://api.businesscentral.dynamics.com/.default"
+# d365_auth_url = "https://login.microsoftonline.com/%s/oauth2/v2.0/token"  # %s = tenant ID
+
+# Your Business Central environment and company, written as shown in BC
+# (spaces are fine). The OData web services URL is built from these:
+#   https://api.businesscentral.dynamics.com/v2.0/<tenant>/<environment>/ODataV4/Company('<company>')/<endpoint>
+environment = "Production"
+company = "CRONUS International Ltd."
+
+# Other URL styles, e.g. the standard API v2.0: remove environment and
+# company above and write the full URL; %s is where the endpoint goes.
+# api_url = "https://api.businesscentral.dynamics.com/v2.0/${D365_TENANT_ID}/Production/api/v2.0/companies(<company id>)/%s"
 
 timeout = "30s"
 
-# Generic entity name used in /api/v1/d365/bc/<entity> = BC web service name.
-# Add entities here; no code changes needed. Permissions live in rbac.toml.
+# Generic entity name used in /api/v1/d365/<name>/<entity> = BC web service
+# name. Add entities here; no code changes needed. Permissions live in
+# rbac.toml.
 [endpoints]
 customer = "Customers_Card"
 item = "Item_Card_Excel"
@@ -405,8 +360,9 @@ so_lines = "SOLines"
 
 ```toml
 # Dynamics 365 Finance & Operations (Finance, Supply Chain Management)
-# connector. Copy to connector-fo.toml (git-ignored) and fill in your
-# environment.
+# connector. Copy to connector-fo.toml (git-ignored; any
+# connector-<name>.toml works), fill in your environment, and point
+# D365_CONNECTOR in .env at it.
 #
 # Setup (https://learn.microsoft.com/dynamics365/fin-ops-core/dev-itpro/data-entities/services-home-page):
 #   1. Microsoft Entra admin center > App registrations > New registration.
@@ -416,27 +372,34 @@ so_lines = "SOLines"
 #      roles this integration needs (not Admin). F&O applies that user's
 #      permissions and default company to every call.
 
-d365_product = "fo"                               # "bc" or "fo"
+instance = "fo"                                   # "bc" or "fo"
 
-# Microsoft Entra ID, client credentials flow (OAuth 2.0 v2 endpoint).
-# The scope is your F&O environment URL (no trailing slash) + "/.default".
-d365_tenant_id = "${FO_TENANT_ID}"
-d365_client_id = "${FO_CLIENT_ID}"
-d365_client_secret = "${FO_CLIENT_SECRET}"
-d365_grant_type = "client_credentials"
-d365_scope = "https://${FO_ENV_HOST}/.default"
-d365_auth_url = "https://login.microsoftonline.com/%s/oauth2/v2.0/token"  # %s = tenant ID
+# Name in the URL (/api/v1/d365/<name>/<entity>) and in rbac.toml.
+# Defaults to the file name without "connector-" and ".toml".
+# name = "fo"
 
-# OData root is <environment URL>/data; %s is replaced with the entity set
-# name (plus the record key, if any), e.g.
-#   https://contoso.operations.dynamics.com/data/CustomersV3(dataAreaId='usmf',CustomerAccount='US-001')
-# Browse <environment URL>/data/$metadata for every public entity set.
-api_url = "https://${FO_ENV_HOST}/data/%s"
+# Microsoft Entra ID, client credentials flow. Secrets stay in .env.
+d365_tenant_id = "${D365_TENANT_ID}"
+d365_client_id = "${D365_CLIENT_ID}"
+d365_client_secret = "${D365_CLIENT_SECRET}"
+# Optional. The scope defaults to "https://<host>/.default".
+# d365_scope = "https://your-env.operations.dynamics.com/.default"
+# d365_auth_url = "https://login.microsoftonline.com/%s/oauth2/v2.0/token"  # %s = tenant ID
+
+# Your F&O environment host. The OData URL is built from it:
+#   https://<host>/data/<endpoint>
+# e.g. https://contoso.operations.dynamics.com/data/CustomersV3(dataAreaId='usmf',CustomerAccount='US-001')
+# Browse https://<host>/data/$metadata for every public entity set.
+host = "your-env.operations.dynamics.com"
+
+# Or write the full URL instead of host; %s is where the endpoint goes.
+# api_url = "https://your-env.operations.dynamics.com/data/%s"
 
 timeout = "60s"
 
-# Generic entity name used in /api/v1/d365/fo/<entity> = F&O public entity
-# set name. Keys in F&O need every key field, usually including dataAreaId.
+# Generic entity name used in /api/v1/d365/<name>/<entity> = F&O public
+# entity set name. Keys in F&O need every key field, usually including
+# dataAreaId.
 [endpoints]
 customer = "CustomersV3"
 item = "ReleasedProductsV2"
@@ -550,7 +513,7 @@ Perintah yang tersedia:
 | `check` | memeriksa semua file konfigurasi lalu keluar |
 | `hash-password <password>` | membuat hash bcrypt untuk `password_hash` |
 
-Semua perintah bisa diberi `-config path/ke/config.toml`. Kalau tidak diberi, yang dipakai adalah `config.toml` di folder saat ini (atau isi env `CONFIG_PATH`). Server berhenti dengan rapi kalau menerima Ctrl+C atau `SIGTERM`.
+Semua perintah bisa diberi `-config path/ke/config.toml`. Kalau tidak diberi, yang dipakai adalah `config.toml` di folder saat ini (atau isi env `CONFIG_PATH`). `config.toml` di folder saat ini boleh tidak ada; file yang ditunjuk lewat `-config` atau `CONFIG_PATH` wajib ada. `.env` selalu dibaca dari folder yang sama dengan path config tersebut. Server berhenti dengan rapi kalau menerima Ctrl+C atau `SIGTERM`.
 
 ## Menyiapkan akses ke D365
 
@@ -572,10 +535,11 @@ Perbedaan BC dan FO ada di scope dan URL API-nya:
 ### Business Central
 
 1. Buka Microsoft Entra admin center, masuk ke App registrations, lalu buat registrasi baru.
-2. Di menu Certificates & secrets, buat client secret baru, lalu salin nilainya ke `BC_CLIENT_SECRET`.
+2. Di menu Certificates & secrets, buat client secret baru, lalu salin nilainya ke `D365_CLIENT_SECRET`. Tenant ID dan client ID-nya masuk ke `D365_TENANT_ID` dan `D365_CLIENT_ID`.
 3. Di menu API permissions, tambahkan Dynamics 365 Business Central dengan tipe Application permissions, pilih `API.ReadWrite.All`, lalu klik Grant admin consent.
 4. Di Business Central, buka halaman Microsoft Entra Applications dan buat entri baru. Masukkan client ID, ubah State menjadi Enabled, lalu berikan permission set seperlunya. Permission set SUPER memang tidak bisa diberikan ke aplikasi.
 5. Kalau kamu memakai OData web services, publish page yang dibutuhkan di halaman Web Services. Nama service yang muncul di sana adalah nama yang ditulis di `[endpoints]`.
+6. Di file connector, isi `environment` (default `Production`) dan `company` persis seperti nama company di BC. Spasi boleh ditulis apa adanya, encoding URL-nya ditangani otomatis.
 
 Referensi resmi: [Using Service to Service Authentication](https://learn.microsoft.com/dynamics365/business-central/dev-itpro/administration/automation-apis-using-s2s-authentication)
 
@@ -583,7 +547,7 @@ Referensi resmi: [Using Service to Service Authentication](https://learn.microso
 
 1. Di Microsoft Entra admin center, buat app registration dan client secret seperti di atas.
 2. Di FO, buka System administration > Setup > Microsoft Entra applications, lalu buat entri baru dengan client ID tadi. Di kolom User ID, pilih user khusus untuk integrasi ini yang hanya punya security role seperlunya. Jangan pakai Admin. Semua request dari backend akan berjalan dengan hak akses user ini.
-3. Isi `FO_ENV_HOST` dengan host environment-nya saja, tanpa `https://` dan tanpa garis miring di belakang. Contoh: `contoso.operations.dynamics.com`.
+3. Di file connector, isi `host` dengan host environment kamu, misalnya `contoso.operations.dynamics.com`. Kalau tertulis dengan `https://` atau garis miring di belakang juga tetap diterima. URL OData dan scope Microsoft Entra (`https://<host>/.default`) dibentuk otomatis dari host itu.
 4. Daftar nama entity yang tersedia bisa dilihat di `https://<env>.operations.dynamics.com/data/$metadata`.
 
 FO punya perilaku yang perlu diperhatikan: secara default ia hanya mengembalikan data dari company default milik user integrasi tadi. Kalau request diberi `?cross-company=true`, data dari semua company yang bisa diakses user itu ikut keluar. Karena itu connector FO di contoh memaksa `cross-company=false` lewat `[forced_query]`, supaya aplikasi tidak bisa mengintip data legal entity lain.
@@ -592,19 +556,31 @@ Referensi resmi: [Service endpoints overview](https://learn.microsoft.com/dynami
 
 ### Tentang file connector
 
+`instance` wajib diisi `"bc"` atau `"fo"`. Dari situ backend tahu cara membentuk URL dan scope-nya:
+
+| | `instance = "bc"` | `instance = "fo"` |
+|---|---|---|
+| Yang diisi | `company`, dan `environment` (default `Production`) | `host` |
+| URL yang dibentuk | `https://api.businesscentral.dynamics.com/v2.0/<tenant>/<environment>/ODataV4/Company('<company>')/<entity>` | `https://<host>/data/<entity>` |
+| Scope | `https://api.businesscentral.dynamics.com/.default` | `https://<host>/.default` |
+
+Kalau butuh bentuk URL lain, misalnya BC API v2.0 (`.../api/v2.0/companies(<id>)/...`), hapus `company`/`environment`/`host` lalu tulis `api_url` lengkap dengan `%s` di posisi entity. Server menolak kalau `api_url` dan `company`/`host` ditulis bersamaan, supaya tidak ambigu. `d365_scope` dan `d365_auth_url` juga hanya perlu ditulis kalau mau menimpa default.
+
+Nama connector dipakai di URL (`/api/v1/d365/<nama>/...`) dan di `rbac.toml` (`[d365.<nama>.<entity>]`). Defaultnya diambil dari nama file tanpa `connector-` dan `.toml`, jadi `connector-bc.toml` menjadi `bc` dan `connector-bc-prod.toml` menjadi `bc-prod`. Kalau mau nama lain, tulis `name = "..."` di file connector.
+
 Bagian `[endpoints]` memetakan nama yang dipakai aplikasi ke nama entity di D365. Misalnya `customer = "CustomersV3"` berarti aplikasi cukup memanggil `/api/v1/d365/fo/customer`. Menambah entity baru cukup dengan menambah satu baris lalu restart server, tanpa mengubah kode.
 
 `[default_query]` berisi parameter yang ditambahkan otomatis saat aplikasi mengambil daftar data (GET tanpa key) dan tidak mengirim parameter itu sendiri. Contohnya `$top = "200"`, supaya tidak ada yang tanpa sengaja menarik ribuan baris sekaligus.
 
 `[forced_query]` berisi parameter yang selalu dipakai dan menimpa apa pun yang dikirim aplikasi. Contohnya `cross-company = "false"` di FO.
 
-Untuk menambah environment baru, misalnya BC produksi terpisah dari BC development, buat file connector baru lalu daftarkan di `[connectors]`:
+Biasanya satu instance cukup satu connector. Kalau memang perlu lebih dari satu sekaligus (misalnya BC dan FO dalam satu server), tulis beberapa file dipisah koma:
 
-```toml
-[connectors]
-bc = "connector-bc.toml"
-bc_prod = "connector-bc-prod.toml"
+```dotenv
+D365_CONNECTOR=connector-bc.toml,connector-fo.toml
 ```
+
+Karena `D365_TENANT_ID` dan kawan-kawan dipakai bersama, connector kedua yang memakai app registration lain cukup merujuk variabel `.env` sendiri, misalnya `d365_client_secret = "${FO_CLIENT_SECRET}"`.
 
 Token dari Microsoft disimpan di memory dan dipakai ulang sampai kira-kira satu menit sebelum kedaluwarsa. Kalau D365 tiba-tiba menolak dengan 401, backend akan meminta token baru lalu mencoba sekali lagi.
 
@@ -750,7 +726,7 @@ Semua butuh login.
 
 | Method | Path | Keterangan |
 |---|---|---|
-| GET | `/d365` | daftar connector dan entity yang boleh dibaca user ini |
+| GET | `/d365` | daftar connector (beserta `instance`-nya, `bc` atau `fo`) dan entity yang boleh dibaca user ini |
 | GET | `/d365/:connector` | daftar entity beserta aksi yang diizinkan |
 | GET, POST, PATCH, PUT, DELETE | `/d365/:connector/:entity` | diteruskan ke D365, termasuk query OData-nya |
 | sama | `/d365/:connector/:entity(<key>)` | untuk satu record tertentu |
@@ -881,12 +857,12 @@ Sebelum naik ke produksi, cek daftar ini:
 ```
 main.go                      perintah: serve, migrate, seed, check, hash-password
 example.env                  contoh untuk .env
-example.config.toml          contoh untuk config.toml
+example.config.toml          contoh config.toml (opsional, hanya key yang sering diubah)
 example.rbac.toml            contoh untuk rbac.toml
-example.connector-bc.toml    contoh untuk connector-bc.toml
-example.connector-fo.toml    contoh untuk connector-fo.toml
+example.connector-bc.toml    contoh connector Business Central (instance = "bc")
+example.connector-fo.toml    contoh connector Finance & Operations (instance = "fo")
 init/users.example.json      contoh untuk init/users.json
-internal/config              membaca config, mengganti ${ENV}, validasi
+internal/config              membaca config, mengganti ${ENV}, validasi; defaults.toml = semua nilai bawaan
 internal/database            koneksi ke berbagai database dan migrasi
 internal/store               query ke tabel users dan sessions
 internal/auth                JWT, login, refresh, session, lockout, akun, manajemen user
@@ -906,7 +882,10 @@ Tambahkan versi migrasi baru di bagian paling akhir daftar `migrations` di `inte
 
 | Gejala | Penyebab yang paling sering |
 |---|---|
-| `invalid config ... unknown keys` | ada key yang salah ketik di `config.toml`. Bandingkan dengan `example.config.toml`. |
+| `invalid config ... unknown keys` | ada key yang salah ketik di `config.toml`. Bandingkan dengan `example.config.toml`. Config lama yang masih punya `[connectors]` juga kena ini: ganti dengan `[d365]` dan isi `D365_CONNECTOR` di `.env`. |
+| `connector: open connector-bc.toml: ...` | file yang ditunjuk `D365_CONNECTOR` belum dibuat. Copy dari `example.connector-*.toml`. |
+| `company is required` / `host is required` | file connector BC belum mengisi `company`, atau FO belum mengisi `host` |
+| `instance must be "bc" or "fo"` | `instance` di file connector belum diisi atau salah ketik |
 | `jwt.access.secret must be at least 32 characters` | `.env` belum diisi, atau tidak berada di folder yang sama dengan `config.toml` |
 | `connect postgres: ...` | database belum jalan, belum dibuat, atau `DB_PORT` masih port database lain |
 | `502 d365_unavailable`, di log ada `AADSTS700016` | client ID salah, atau app tidak terdaftar di tenant tersebut |

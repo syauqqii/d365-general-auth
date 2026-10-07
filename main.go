@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -77,7 +78,11 @@ func run() error {
 		return nil
 	}
 
-	cfg, err := config.Load(*configPath)
+	// The default config.toml is optional (built-in defaults + .env); a file
+	// named explicitly with -config or CONFIG_PATH must exist.
+	explicit := os.Getenv("CONFIG_PATH") != ""
+	fs.Visit(func(f *flag.Flag) { explicit = explicit || f.Name == "config" })
+	cfg, err := config.Load(*configPath, !explicit)
 	if err != nil {
 		return err
 	}
@@ -105,7 +110,12 @@ func run() error {
 		if err != nil {
 			return err
 		}
-		fmt.Printf("config OK: env=%s db=%s connectors=%d\n", cfg.App.Env, cfg.Database.Driver, len(conns))
+		names := make([]string, 0, len(conns))
+		for _, c := range conns {
+			names = append(names, c.Name+"("+c.Instance+")")
+		}
+		slices.Sort(names)
+		fmt.Printf("config OK: env=%s db=%s connectors=[%s]\n", cfg.App.Env, cfg.Database.Driver, strings.Join(names, " "))
 		return nil
 	}
 	fmt.Fprint(os.Stderr, usage)

@@ -1,5 +1,6 @@
 # Dynamics 365 Business Central connector.
-# Copy to connector-bc.toml (git-ignored) and fill in your tenant.
+# Copy to connector-bc.toml (git-ignored; any connector-<name>.toml works),
+# fill in your environment, and point D365_CONNECTOR in .env at it.
 #
 # Setup (https://learn.microsoft.com/dynamics365/business-central/dev-itpro/administration/automation-apis-using-s2s-authentication):
 #   1. Microsoft Entra admin center > App registrations > New registration.
@@ -10,31 +11,35 @@
 #      the client ID, set State = Enabled and assign least-privilege
 #      permission sets (SUPER cannot be assigned to apps).
 
-d365_product = "bc"                               # "bc" or "fo"
+instance = "bc"                                   # "bc" or "fo"
 
-# Microsoft Entra ID, client credentials flow (OAuth 2.0 v2 endpoint).
-d365_tenant_id = "${BC_TENANT_ID}"                # Directory (tenant) ID
-d365_client_id = "${BC_CLIENT_ID}"                # Application (client) ID
-d365_client_secret = "${BC_CLIENT_SECRET}"
-d365_grant_type = "client_credentials"
-d365_scope = "https://api.businesscentral.dynamics.com/.default"
-d365_auth_url = "https://login.microsoftonline.com/%s/oauth2/v2.0/token"  # %s = tenant ID
+# Name in the URL (/api/v1/d365/<name>/<entity>) and in rbac.toml.
+# Defaults to the file name without "connector-" and ".toml".
+# name = "bc"
 
-# Base URL; %s is replaced with the endpoint name from [endpoints] (plus the
-# record key, if any). Pick ONE style:
-#
-#   OData web services (pages published in "Web Services"):
-#     https://api.businesscentral.dynamics.com/v2.0/<tenant>/<environment>/ODataV4/Company('<company name>')/%s
-#   Standard API v2.0 (entity sets: customers, items, salesOrders, ...):
-#     https://api.businesscentral.dynamics.com/v2.0/<tenant>/<environment>/api/v2.0/companies(<company id>)/%s
-#
-# Spaces in the company name must be written as %20.
-api_url = "https://api.businesscentral.dynamics.com/v2.0/${BC_TENANT_ID}/${BC_ENVIRONMENT:-Production}/ODataV4/Company('${BC_COMPANY}')/%s"
+# Microsoft Entra ID, client credentials flow. Secrets stay in .env.
+d365_tenant_id = "${D365_TENANT_ID}"              # Directory (tenant) ID
+d365_client_id = "${D365_CLIENT_ID}"              # Application (client) ID
+d365_client_secret = "${D365_CLIENT_SECRET}"
+# Optional, defaults shown:
+# d365_scope = "https://api.businesscentral.dynamics.com/.default"
+# d365_auth_url = "https://login.microsoftonline.com/%s/oauth2/v2.0/token"  # %s = tenant ID
+
+# Your Business Central environment and company, written as shown in BC
+# (spaces are fine). The OData web services URL is built from these:
+#   https://api.businesscentral.dynamics.com/v2.0/<tenant>/<environment>/ODataV4/Company('<company>')/<endpoint>
+environment = "Production"
+company = "CRONUS International Ltd."
+
+# Other URL styles, e.g. the standard API v2.0: remove environment and
+# company above and write the full URL; %s is where the endpoint goes.
+# api_url = "https://api.businesscentral.dynamics.com/v2.0/${D365_TENANT_ID}/Production/api/v2.0/companies(<company id>)/%s"
 
 timeout = "30s"
 
-# Generic entity name used in /api/v1/d365/bc/<entity> = BC web service name.
-# Add entities here; no code changes needed. Permissions live in rbac.toml.
+# Generic entity name used in /api/v1/d365/<name>/<entity> = BC web service
+# name. Add entities here; no code changes needed. Permissions live in
+# rbac.toml.
 [endpoints]
 customer = "Customers_Card"
 item = "Item_Card_Excel"

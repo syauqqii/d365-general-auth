@@ -42,7 +42,7 @@ func (s *Server) d365Connectors(c *fiber.Ctx) error {
 				entities = append(entities, e)
 			}
 		}
-		out = append(out, fiber.Map{"name": n, "product": conn.Product, "entities": entities})
+		out = append(out, fiber.Map{"name": n, "instance": conn.Instance, "entities": entities})
 	}
 	return ok(c, out)
 }
@@ -62,7 +62,7 @@ func (s *Server) d365Entities(c *fiber.Ctx) error {
 			entities[e] = actions
 		}
 	}
-	return ok(c, fiber.Map{"name": name, "product": conn.Product, "entities": entities})
+	return ok(c, fiber.Map{"name": name, "instance": conn.Instance, "entities": entities})
 }
 
 // d365Proxy forwards /d365/<connector>/<entity>[(key)]?<odata query> to the

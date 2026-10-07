@@ -1,6 +1,7 @@
 package config
 
 import (
+	_ "embed"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -21,15 +22,15 @@ import (
 const APIPrefix = "/api/v1"
 
 type Config struct {
-	App        App               `toml:"app"`
-	JWT        JWT               `toml:"jwt"`
-	Cookie     Cookie            `toml:"cookie"`
-	Database   Database          `toml:"database"`
-	Security   Security          `toml:"security"`
-	Account    Account           `toml:"account"`
-	RBAC       RBAC              `toml:"rbac"`
-	Connectors map[string]string `toml:"connectors"`
-	Seed       Seed              `toml:"seed"`
+	App      App      `toml:"app"`
+	JWT      JWT      `toml:"jwt"`
+	Cookie   Cookie   `toml:"cookie"`
+	Database Database `toml:"database"`
+	Security Security `toml:"security"`
+	Account  Account  `toml:"account"`
+	RBAC     RBAC     `toml:"rbac"`
+	D365     D365     `toml:"d365"`
+	Seed     Seed     `toml:"seed"`
 
 	dir string
 }
@@ -125,70 +126,39 @@ type RBAC struct {
 	File string `toml:"file"`
 }
 
+// D365 selects the active connector files. Connector holds one file, or
+// several separated by commas; empty turns the D365 proxy off.
+type D365 struct {
+	Connector string `toml:"connector"`
+}
+
+// Files returns the connector file paths listed in Connector.
+func (d D365) Files() []string {
+	var out []string
+	for _, f := range strings.Split(d.Connector, ",") {
+		if f = strings.TrimSpace(f); f != "" {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
 type Seed struct {
 	UsersFile string `toml:"users_file"`
 }
 
-func defaults() *Config {
-	return &Config{
-		App: App{
-			Name:         "general-auth",
-			Env:          "development",
-			Host:         "0.0.0.0",
-			Port:         3000,
-			BodyLimitMB:  10,
-			ReadTimeout:  Duration{30 * time.Second},
-			WriteTimeout: Duration{90 * time.Second},
-			IdleTimeout:  Duration{120 * time.Second},
-		},
-		JWT: JWT{
-			Issuer:   "general-auth",
-			Audience: "general-auth-api",
-			Access:   AccessToken{TTL: Duration{15 * time.Minute}},
-			Refresh: RefreshToken{
-				WebTTL:        Duration{7 * 24 * time.Hour},
-				MobileTTL:     Duration{90 * 24 * time.Hour},
-				MaxSessionAge: Duration{180 * 24 * time.Hour},
-			},
-		},
-		Cookie: Cookie{
-			Enabled:  true,
-			Name:     "ga_refresh",
-			Path:     APIPrefix + "/auth",
-			Secure:   true,
-			SameSite: "Strict",
-		},
-		Database: Database{
-			Driver:          "postgres",
-			MaxOpenConns:    25,
-			MaxIdleConns:    25,
-			ConnMaxLifetime: Duration{30 * time.Minute},
-			ConnMaxIdleTime: Duration{5 * time.Minute},
-			AutoMigrate:     true,
-		},
-		Security: Security{
-			BcryptCost:             12,
-			PasswordMinLength:      8,
-			LoginRateLimit:         10,
-			LoginRateWindow:        Duration{time.Minute},
-			MaxFailedLogins:        5,
-			LockoutDuration:        Duration{15 * time.Minute},
-			SessionCleanupInterval: Duration{time.Hour},
-		},
-		Account: Account{
-			DefaultCanChangeUsername: false,
-			DefaultCanChangeEmail:    true,
-			DefaultCanChangePassword: true,
-		},
-		RBAC: RBAC{File: "rbac.toml"},
-		Seed: Seed{UsersFile: "init/users.json"},
-	}
-}
+// defaultsTOML holds every setting's default. It is decoded before the
+// user's config.toml, so that file only needs the keys it changes.
+//
+//go:embed defaults.toml
+var defaultsTOML string
 
-// Load reads the TOML config at path. A .env file next to it (if present) is
-// loaded first so ${VAR} references can be resolved; real environment
-// variables always win over .env values.
-func Load(path string) (*Config, error) {
+// Load reads the configuration: the built-in defaults (defaults.toml), then
+// the TOML file at path on top of them. A .env file next to path is loaded
+// first so ${VAR} references can be resolved; real environment variables
+// always win over .env values. When optional is set, a missing file is not
+// an error: the defaults (plus .env) are used as they are.
+func Load(path string, optional bool) (*Config, error) {
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return nil, err
@@ -198,25 +168,31 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("load .env: %w", err)
 	}
 
-	raw, err := os.ReadFile(abs)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, fmt.Errorf("config file %s not found (copy example.config.toml to config.toml)", path)
-	}
-	if err != nil {
-		return nil, err
+	cfg := &Config{}
+	if _, err := toml.Decode(string(ExpandEnv([]byte(defaultsTOML))), cfg); err != nil {
+		return nil, fmt.Errorf("built-in defaults: %w", err)
 	}
 
-	cfg := defaults()
-	md, err := toml.Decode(string(ExpandEnv(raw)), cfg)
-	if err != nil {
-		return nil, fmt.Errorf("parse %s: %w", path, err)
+	raw, err := os.ReadFile(abs)
+	switch {
+	case errors.Is(err, os.ErrNotExist) && optional:
+	case errors.Is(err, os.ErrNotExist):
+		return nil, fmt.Errorf("config file %s not found", path)
+	case err != nil:
+		return nil, err
+	default:
+		md, err := toml.Decode(string(ExpandEnv(raw)), cfg)
+		if err != nil {
+			return nil, fmt.Errorf("parse %s: %w", path, err)
+		}
+		if keys := md.Undecoded(); len(keys) > 0 {
+			return nil, fmt.Errorf("parse %s: unknown keys %v", path, keys)
+		}
 	}
-	if keys := md.Undecoded(); len(keys) > 0 {
-		return nil, fmt.Errorf("parse %s: unknown keys %v", path, keys)
-	}
+
 	cfg.dir = dir
 	if err := cfg.Validate(); err != nil {
-		return nil, fmt.Errorf("invalid config %s:\n%w", path, err)
+		return nil, fmt.Errorf("invalid config:\n%w", err)
 	}
 	for _, w := range cfg.warnings() {
 		slog.Warn(w)

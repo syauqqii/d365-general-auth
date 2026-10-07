@@ -13,6 +13,8 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -23,19 +25,38 @@ import (
 	"general-auth/internal/config"
 )
 
-// Connector is one D365 environment, loaded from a connector-*.toml file.
+// Default Microsoft Entra token endpoint and Business Central scope; F&O's
+// scope is derived from api_url because every F&O environment has its own.
+const (
+	defaultAuthURL = "https://login.microsoftonline.com/%s/oauth2/v2.0/token"
+	bcScope        = "https://api.businesscentral.dynamics.com/.default"
+)
+
+// validName is what may appear in /d365/<name>/... and in rbac.toml.
+var validName = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+
+// Connector is one D365 environment, loaded from a connector file.
 type Connector struct {
-	Name         string            `toml:"-"`
-	Product      string            `toml:"d365_product"`
-	TenantID     string            `toml:"d365_tenant_id"`
-	ClientID     string            `toml:"d365_client_id"`
-	ClientSecret string            `toml:"d365_client_secret"`
-	GrantType    string            `toml:"d365_grant_type"`
-	Scope        string            `toml:"d365_scope"`
-	AuthURL      string            `toml:"d365_auth_url"`
-	APIURL       string            `toml:"api_url"`
-	Timeout      config.Duration   `toml:"timeout"`
-	Endpoints    map[string]string `toml:"endpoints"`
+	// Name is used in the URL (/d365/<name>/<entity>) and in rbac.toml.
+	// Defaults to the file name without "example.", "connector-" and ".toml".
+	Name string `toml:"name"`
+	// Instance is the D365 product behind this connector: "bc" or "fo".
+	Instance     string `toml:"instance"`
+	TenantID     string `toml:"d365_tenant_id"`
+	ClientID     string `toml:"d365_client_id"`
+	ClientSecret string `toml:"d365_client_secret"`
+	GrantType    string `toml:"d365_grant_type"`
+	Scope        string `toml:"d365_scope"`
+	AuthURL      string `toml:"d365_auth_url"`
+	// BC: environment (default "Production") and company name; FO: the
+	// environment host. api_url is built from them unless it is set.
+	Environment string `toml:"environment"`
+	Company     string `toml:"company"`
+	Host        string `toml:"host"`
+	// APIURL is the full OData URL with %s where the entity set goes.
+	APIURL    string            `toml:"api_url"`
+	Timeout   config.Duration   `toml:"timeout"`
+	Endpoints map[string]string `toml:"endpoints"`
 	// DefaultQuery is added to collection reads (GET without a key) when
 	// the client did not send that parameter;
 	// ForcedQuery always replaces whatever the client sent.
@@ -50,38 +71,71 @@ type Connector struct {
 
 // Load reads a connector file. ${VAR} references are expanded, so the
 // client secret can come from the environment.
-func Load(name, path string) (*Connector, error) {
+func Load(path string) (*Connector, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("connector %s: %w", name, err)
+		return nil, fmt.Errorf("connector: %w", err)
 	}
-	c := &Connector{Name: name}
+	c := &Connector{}
 	md, err := toml.Decode(string(config.ExpandEnv(raw)), c)
 	if err != nil {
-		return nil, fmt.Errorf("connector %s: parse %s: %w", name, path, err)
+		return nil, fmt.Errorf("connector: parse %s: %w", path, err)
 	}
 	if keys := md.Undecoded(); len(keys) > 0 {
-		return nil, fmt.Errorf("connector %s: unknown keys %v in %s", name, keys, path)
+		return nil, fmt.Errorf("connector: unknown keys %v in %s", keys, path)
 	}
 
-	c.Product = strings.ToLower(strings.TrimSpace(c.Product))
-	if c.Product == "" {
-		c.Product = "bc"
+	if c.Name == "" {
+		base := strings.TrimPrefix(strings.TrimSuffix(filepath.Base(path), ".toml"), "example.")
+		c.Name = strings.TrimPrefix(base, "connector-")
 	}
+	c.Instance = strings.ToLower(strings.TrimSpace(c.Instance))
 	if c.GrantType == "" {
 		c.GrantType = "client_credentials"
+	}
+	if c.AuthURL == "" {
+		c.AuthURL = defaultAuthURL
 	}
 	if c.Timeout.Duration <= 0 {
 		c.Timeout.Duration = 30 * time.Second
 	}
 
 	var errs []error
-	if c.Product != "bc" && c.Product != "fo" {
-		errs = append(errs, fmt.Errorf("d365_product must be \"bc\" or \"fo\", got %q", c.Product))
+	if !validName.MatchString(c.Name) {
+		errs = append(errs, fmt.Errorf("name %q may only contain letters, digits, _ and -", c.Name))
+	}
+	switch c.Instance {
+	case "bc":
+		if c.Host != "" {
+			errs = append(errs, errors.New(`host is for instance = "fo"; Business Central uses environment and company`))
+		}
+	case "fo":
+		if c.Environment != "" || c.Company != "" {
+			errs = append(errs, errors.New(`environment and company are for instance = "bc"; F&O uses host`))
+		}
+	default:
+		errs = append(errs, fmt.Errorf("instance must be \"bc\" or \"fo\", got %q", c.Instance))
+	}
+	if c.APIURL != "" && (c.Environment != "" || c.Company != "" || c.Host != "") {
+		errs = append(errs, errors.New("set either api_url or environment/company/host, not both"))
+	}
+	if c.APIURL == "" {
+		c.APIURL = c.buildAPIURL()
+		if c.APIURL == "" {
+			switch c.Instance {
+			case "bc":
+				errs = append(errs, errors.New("company is required (or a full api_url)"))
+			case "fo":
+				errs = append(errs, errors.New("host is required (or a full api_url)"))
+			}
+		}
+	}
+	if c.Scope == "" {
+		c.Scope = defaultScope(c.Instance, c.APIURL)
 	}
 	for k, v := range map[string]string{
 		"d365_tenant_id": c.TenantID, "d365_client_id": c.ClientID, "d365_client_secret": c.ClientSecret,
-		"d365_scope": c.Scope, "d365_auth_url": c.AuthURL, "api_url": c.APIURL,
+		"d365_scope": c.Scope,
 	} {
 		if strings.TrimSpace(v) == "" {
 			errs = append(errs, fmt.Errorf("%s is required", k))
@@ -91,11 +145,59 @@ func Load(name, path string) (*Connector, error) {
 		errs = append(errs, errors.New("api_url must contain %s where the endpoint name goes"))
 	}
 	if err := errors.Join(errs...); err != nil {
-		return nil, fmt.Errorf("connector %s (%s): %w", name, path, err)
+		return nil, fmt.Errorf("connector %s (%s): %w", c.Name, path, err)
 	}
 
 	c.client = &http.Client{Timeout: c.Timeout.Duration}
 	return c, nil
+}
+
+// buildAPIURL makes the standard OData URL from environment/company (BC) or
+// host (F&O). It returns "" when the needed field is missing.
+func (c *Connector) buildAPIURL() string {
+	switch c.Instance {
+	case "bc":
+		company := strings.TrimSpace(c.Company)
+		if company == "" {
+			return ""
+		}
+		// Accept names written already encoded ("CRONUS%20...") as well.
+		if plain, err := url.PathUnescape(company); err == nil {
+			company = plain
+		}
+		env := strings.TrimSpace(c.Environment)
+		if env == "" {
+			env = "Production"
+		}
+		// OData string literals escape ' by doubling it.
+		return "https://api.businesscentral.dynamics.com/v2.0/" + url.PathEscape(c.TenantID) + "/" +
+			url.PathEscape(env) + "/ODataV4/Company('" + url.PathEscape(strings.ReplaceAll(company, "'", "''")) + "')/%s"
+	case "fo":
+		host := strings.TrimSpace(c.Host)
+		host = strings.TrimPrefix(strings.TrimPrefix(host, "https://"), "http://")
+		host = strings.TrimRight(host, "/")
+		if host == "" {
+			return ""
+		}
+		return "https://" + host + "/data/%s"
+	}
+	return ""
+}
+
+// defaultScope is the Entra scope for an instance when d365_scope is not set:
+// the fixed BC resource, or the F&O environment URL taken from api_url.
+func defaultScope(instance, apiURL string) string {
+	switch instance {
+	case "bc":
+		return bcScope
+	case "fo":
+		// Only the part before %s: "%s" itself is not a valid URL escape.
+		base, _, _ := strings.Cut(apiURL, "%s")
+		if u, err := url.Parse(base); err == nil && u.Scheme != "" && u.Host != "" {
+			return u.Scheme + "://" + u.Host + "/.default"
+		}
+	}
+	return ""
 }
 
 // Entities returns the configured entity names, sorted.
@@ -208,15 +310,19 @@ func (c *Connector) Do(ctx context.Context, method, endpoint, keySuffix, rawQuer
 	}
 }
 
-// LoadAll loads every connector listed in config [connectors].
+// LoadAll loads the active connector files from config [d365] connector.
 func LoadAll(cfg *config.Config) (map[string]*Connector, error) {
-	out := make(map[string]*Connector, len(cfg.Connectors))
-	for name, path := range cfg.Connectors {
-		c, err := Load(name, cfg.Resolve(path))
+	files := cfg.D365.Files()
+	out := make(map[string]*Connector, len(files))
+	for _, path := range files {
+		c, err := Load(cfg.Resolve(path))
 		if err != nil {
 			return nil, err
 		}
-		out[name] = c
+		if _, dup := out[c.Name]; dup {
+			return nil, fmt.Errorf("connector name %q is used by more than one file (set a different `name` in %s)", c.Name, path)
+		}
+		out[c.Name] = c
 	}
 	return out, nil
 }

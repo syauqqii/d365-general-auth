@@ -1,6 +1,7 @@
 # Dynamics 365 Finance & Operations (Finance, Supply Chain Management)
-# connector. Copy to connector-fo.toml (git-ignored) and fill in your
-# environment.
+# connector. Copy to connector-fo.toml (git-ignored; any
+# connector-<name>.toml works), fill in your environment, and point
+# D365_CONNECTOR in .env at it.
 #
 # Setup (https://learn.microsoft.com/dynamics365/fin-ops-core/dev-itpro/data-entities/services-home-page):
 #   1. Microsoft Entra admin center > App registrations > New registration.
@@ -10,27 +11,34 @@
 #      roles this integration needs (not Admin). F&O applies that user's
 #      permissions and default company to every call.
 
-d365_product = "fo"                               # "bc" or "fo"
+instance = "fo"                                   # "bc" or "fo"
 
-# Microsoft Entra ID, client credentials flow (OAuth 2.0 v2 endpoint).
-# The scope is your F&O environment URL (no trailing slash) + "/.default".
-d365_tenant_id = "${FO_TENANT_ID}"
-d365_client_id = "${FO_CLIENT_ID}"
-d365_client_secret = "${FO_CLIENT_SECRET}"
-d365_grant_type = "client_credentials"
-d365_scope = "https://${FO_ENV_HOST}/.default"
-d365_auth_url = "https://login.microsoftonline.com/%s/oauth2/v2.0/token"  # %s = tenant ID
+# Name in the URL (/api/v1/d365/<name>/<entity>) and in rbac.toml.
+# Defaults to the file name without "connector-" and ".toml".
+# name = "fo"
 
-# OData root is <environment URL>/data; %s is replaced with the entity set
-# name (plus the record key, if any), e.g.
-#   https://contoso.operations.dynamics.com/data/CustomersV3(dataAreaId='usmf',CustomerAccount='US-001')
-# Browse <environment URL>/data/$metadata for every public entity set.
-api_url = "https://${FO_ENV_HOST}/data/%s"
+# Microsoft Entra ID, client credentials flow. Secrets stay in .env.
+d365_tenant_id = "${D365_TENANT_ID}"
+d365_client_id = "${D365_CLIENT_ID}"
+d365_client_secret = "${D365_CLIENT_SECRET}"
+# Optional. The scope defaults to "https://<host>/.default".
+# d365_scope = "https://your-env.operations.dynamics.com/.default"
+# d365_auth_url = "https://login.microsoftonline.com/%s/oauth2/v2.0/token"  # %s = tenant ID
+
+# Your F&O environment host. The OData URL is built from it:
+#   https://<host>/data/<endpoint>
+# e.g. https://contoso.operations.dynamics.com/data/CustomersV3(dataAreaId='usmf',CustomerAccount='US-001')
+# Browse https://<host>/data/$metadata for every public entity set.
+host = "your-env.operations.dynamics.com"
+
+# Or write the full URL instead of host; %s is where the endpoint goes.
+# api_url = "https://your-env.operations.dynamics.com/data/%s"
 
 timeout = "60s"
 
-# Generic entity name used in /api/v1/d365/fo/<entity> = F&O public entity
-# set name. Keys in F&O need every key field, usually including dataAreaId.
+# Generic entity name used in /api/v1/d365/<name>/<entity> = F&O public
+# entity set name. Keys in F&O need every key field, usually including
+# dataAreaId.
 [endpoints]
 customer = "CustomersV3"
 item = "ReleasedProductsV2"

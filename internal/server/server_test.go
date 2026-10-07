@@ -122,8 +122,8 @@ func setup(t *testing.T) (*env, *int32) {
 		return p
 	}
 	t.Setenv("TEST_FO_SECRET", "s3cret")
-	conn, err := d365.Load("fo", write("connector.toml", `
-d365_product = "fo"
+	conn, err := d365.Load(write("connector-fo.toml", `
+instance = "fo"
 d365_tenant_id = "tenant-1"
 d365_client_id = "client-1"
 d365_client_secret = "${TEST_FO_SECRET}"
